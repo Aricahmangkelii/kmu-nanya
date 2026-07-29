@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Rock Paper Scissors Showdown</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0d1117;
+            color: #ffffff;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+        }
+
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .card {
+            background: rgba(22, 27, 34, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            padding: 12px 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+        }
+
+        .score-board {
+            display: flex;
+            gap: 20px;
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        .score-item span {
+            color: #58a6ff;
+        }
+
+        #timer-box {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #ffab70;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        #notification {
+            position: absolute;
+            top: 25%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2.5rem;
+            font-weight: 900;
+            text-shadow: 0 0 20px rgba(88, 166, 255, 0.8);
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            pointer-events: auto;
+        }
+
+        .choice-btn {
+            background: linear-gradient(135deg, #1f6beb, #238636);
+            border: none;
+            color: white;
+            padding: 14px 28px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        .choice-btn:hover {
+            transform: translateY(-4px) scale(1.05);
+            box-shadow: 0 6px 20px rgba(35, 134, 54, 0.6);
+        }
+
+        .choice-btn:disabled {
+            background: #30363d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #settings-bar {
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        select, button.setting-btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            padding: 8px 14px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            outline: none;
+        }
+    </style>
+
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="hud-top">
+            <div class="card score-board">
+                <div class="score-item">P1: <span id="p1-score">0</span></div>
+                <div class="score-item"><span id="p2-label">CPU</span>: <span id="p2-score">0</span></div>
+            </div>
+
+            <div class="card" id="timer-box">10</div>
+        </div>
+
+        <div id="settings-bar" class="card">
+            <div>
+                <label for="mode-select">Mode: </label>
+                <select id="mode-select" onchange="changeMode(this.value)">
+                    <option value="ai">VS Komputer</option>
+                    <option value="pvp">Berdua (2P lokal)</option>
+                </select>
+            </div>
+            <div id="ai-level-box">
+                <label for="level-select">Level AI: </label>
+                <select id="level-select" onchange="changeLevel(this.value)">
+                    <option value="easy">Mudah</option>
+                    <option value="medium" selected>Sedang</option>
+                    <option value="hard">Mustahil (Predictive)</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="notification">SIAP?</div>
+
+        <div id="controls">
+            <button class="choice-btn" onclick="makeChoice('batu')">🪨 Batu</button>
+            <button class="choice-btn" onclick="makeChoice('gunting')">✂️ Gunting</button>
+            <button class="choice-btn" onclick="makeChoice('kertas')">📄 Kertas</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Web Audio API (Suara Synthesizer) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            if (type === 'select') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'win') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
+                osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+            } else if (type === 'lose') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(120, audioCtx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            } else if (type === 'draw') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(330, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(330, audioCtx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.25);
+            }
+        }
+
+        // --- Logika Game ---
+        let mode = 'ai'; // 'ai' atau 'pvp'
+        let aiLevel = 'medium';
+        let p1Choice = null;
+        let p2Choice = null;
+        let p1Score = 0;
+        let p2Score = 0;
+        let timer = 10;
+        let timerInterval = null;
+        let canPlay = true;
+
+        // History p1 untuk AI cerdas
+        const p1History = [];
+
+        // --- Three.js Setup (Visual 3D & Animasi Latar) ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0d1117, 0.03);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Pencahayaan
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0x58a6ff, 1.2);
+        dirLight.position.set(5, 12, 8);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0xffab70, 1, 10);
+        pointLight.position.set(0, 0, 2);
+        scene.add(pointLight);
+
+        // Latar Belakang Animasi: Partikel Neon / Bintang Cyber
+        const particleCount = 200;
+        const particleGeo = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount * 3; i += 3) {
+            positions[i] = (Math.random() - 0.5) * 30;
+            positions[i + 1] = (Math.random() - 0.5) * 20;
+            positions[i + 2] = (Math.random() - 0.5) * 30;
+        }
+
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const particleMat = new THREE.PointsMaterial({ color: 0x58a6ff, size: 0.15, transparent: true, opacity: 0.7 });
+        const particles = new THREE.Points(particleGeo, particleMat);
+        scene.add(particles);
+
+        // Arena Panggung 3D
+        const stageGeo = new THREE.CylinderGeometry(4, 4.5, 0.5, 32);
+        const stageMat = new THREE.MeshStandardMaterial({ color: 0x161b22, roughness: 0.3, metalness: 0.8 });
+        const stage = new THREE.Mesh(stageGeo, stageMat);
+        stage.position.y = -2;
+        stage.receiveShadow = true;
+        scene.add(stage);
+
+        // Geometri Karakter/Objek 3D (Simulasi Batu, Gunting, Kertas)
+        function create3DObject(type) {
+            const group = new THREE.Group();
+            if (type === 'batu') {
+                const geo = new THREE.DodecahedronGeometry(1.2, 1);
+                const mat = new THREE.MeshStandardMaterial({ color: 0x8b949e, roughness: 0.9, flatShading: true });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.castShadow = true;
+                group.add(mesh);
+            } else if (type === 'gunting') {
+                const mat = new THREE.MeshStandardMaterial({ color: 0xf0883e, metalness: 0.8, roughness: 0.2 });
+                const handle1 = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.1, 8, 24), mat);
+                const handle2 = handle1.clone();
+                handle1.position.set(-0.4, -0.6, 0);
+                handle2.position.set(0.4, -0.6, 0);
+
+                const bladeMat = new THREE.MeshStandardMaterial({ color: 0xc9d1d9, metalness: 0.9, roughness: 0.1 });
+                const blade1 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.8, 0.05), bladeMat);
+                const blade2 = blade1.clone();
+                blade1.rotation.z = -0.2;
+                blade1.position.set(-0.2, 0.4, 0);
+                blade2.rotation.z = 0.2;
+                blade2.position.set(0.2, 0.4, 0);
+
+                group.add(handle1, handle2, blade1, blade2);
+            } else if (type === 'kertas') {
+                const geo = new THREE.BoxGeometry(1.8, 0.05, 2.4);
+                const mat = new THREE.MeshStandardMaterial({ color: 0xf0f6fc, roughness: 0.4 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.rotation.x = 0.3;
+                mesh.castShadow = true;
+                group.add(mesh);
+            }
+            return group;
+        }
+
+        // Wadah Objek Player 1 dan Player 2 di 3D World
+        let meshP1 = null;
+        let meshP2 = null;
+
+        function update3DModels(choice1, choice2) {
+            if (meshP1) scene.remove(meshP1);
+            if (meshP2) scene.remove(meshP2);
+
+            if (choice1) {
+                meshP1 = create3DObject(choice1);
+                meshP1.position.set(-2.2, 0, 0);
+                scene.add(meshP1);
+            }
+            if (choice2) {
+                meshP2 = create3DObject(choice2);
+                meshP2.position.set(2.2, 0, 0);
+                scene.add(meshP2);
+            }
+        }
+
+        // --- Alur Permainan & AI ---
+        function startTimer() {
+            clearInterval(timerInterval);
+            timer = 10;
+            document.getElementById('timer-box').innerText = timer;
+
+            timerInterval = setInterval(() => {
+                timer--;
+                document.getElementById('timer-box').innerText = timer;
+                if (timer <= 0) {
+                    clearInterval(timerInterval);
+                    handleTimeout();
+                }
+            }, 1000);
+        }
+
+        function handleTimeout() {
+            showNotification("WAKTU HABIS!");
+            playSound('lose');
+            canPlay = false;
+            setTimeout(resetRound, 2000);
+        }
+
+        function getAIChoice() {
+            const choices = ['batu', 'gunting', 'kertas'];
+            if (aiLevel === 'easy') {
+                return choices[Math.floor(Math.random() * 3)];
+            } else if (aiLevel === 'medium') {
+                return Math.random() > 0.5 ? choices[Math.floor(Math.random() * 3)] : getWinningMove(p1History[p1History.length - 1]);
+            } else if (aiLevel === 'hard') {
+                // Predictive AI berdasarkan pilihan terakhir player
+                if (p1History.length === 0) return choices[Math.floor(Math.random() * 3)];
+                const lastMove = p1History[p1History.length - 1];
+                return getWinningMove(lastMove);
+            }
+        }
+
+        function getWinningMove(move) {
+            if (move === 'batu') return 'kertas';
+            if (move === 'gunting') return 'batu';
+            if (move === 'kertas') return 'gunting';
+            return 'batu';
+        }
+
+        function makeChoice(choice) {
+            if (!canPlay) return;
+            playSound('select');
+
+            if (mode === 'ai') {
+                p1Choice = choice;
+                p1History.push(choice);
+                p2Choice = getAIChoice();
+                evaluateResult();
+            } else if (mode === 'pvp') {
+                if (!p1Choice) {
+                    p1Choice = choice;
+                    showNotification("PEMAIN 2, PILIH!");
+                } else {
+                    p2Choice = choice;
+                    evaluateResult();
+                }
+            }
+        }
+
+        function evaluateResult() {
+            clearInterval(timerInterval);
+            canPlay = false;
+
+            update3DModels(p1Choice, p2Choice);
+
+            let resultMsg = "";
+            if (p1Choice === p2Choice) {
+                resultMsg = "SERI!";
+                playSound('draw');
+            } else if (
+                (p1Choice === 'batu' && p2Choice === 'gunting') ||
+                (p1Choice === 'gunting' && p2Choice === 'kertas') ||
+                (p1Choice === 'kertas' && p2Choice === 'batu')
+            ) {
+                resultMsg = "PEMAIN 1 MENANG!";
+                p1Score++;
+                playSound('win');
+            } else {
+                resultMsg = (mode === 'ai' ? "KOMPUTER" : "PEMAIN 2") + " MENANG!";
+                p2Score++;
+                playSound('lose');
+            }
+
+            document.getElementById('p1-score').innerText = p1Score;
+            document.getElementById('p2-score').innerText = p2Score;
+            showNotification(resultMsg);
+
+            setTimeout(resetRound, 3000);
+        }
+
+        function resetRound() {
+            p1Choice = null;
+            p2Choice = null;
+            if (meshP1) scene.remove(meshP1);
+            if (meshP2) scene.remove(meshP2);
+            showNotification(mode === 'pvp' ? "PEMAIN 1, PILIH!" : "MULAI!");
+            canPlay = true;
+            startTimer();
+        }
+
+        function showNotification(msg) {
+            const notif = document.getElementById('notification');
+            notif.innerText = msg;
+            notif.style.opacity = 1;
+            notif.style.transform = 'translate(-50%, -50%) scale(1.1)';
+            setTimeout(() => {
+                notif.style.opacity = 0;
+                notif.style.transform = 'translate(-50%, -50%) scale(1)';
+            }, 2000);
+        }
+
+        function changeMode(val) {
+            mode = val;
+            document.getElementById('p2-label').innerText = mode === 'ai' ? 'CPU' : 'P2';
+            document.getElementById('ai-level-box').style.display = mode === 'ai' ? 'block' : 'none';
+            p1Score = 0; p2Score = 0;
+            document.getElementById('p1-score').innerText = 0;
+            document.getElementById('p2-score').innerText = 0;
+            resetRound();
+        }
+
+        function changeLevel(val) {
+            aiLevel = val;
+            resetRound();
+        }
+
+        // --- Render Loop (Animasi Frame) ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Perputaran Partikel Latar
+            particles.rotation.y += 0.001;
+
+            // Efek Rotasi Objek 3D Hasil Pilihan
+            if (meshP1) meshP1.rotation.y += 0.02;
+            if (meshP2) meshP2.rotation.y += 0.02;
+
+            renderer.render(scene, camera);
+        }
+
+        // Responsif Layar
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Jalankan Game
+        resetRound();
+        animate();
+    </script>
+</body>
+</html>
